@@ -138,6 +138,21 @@ func handleNewUser(connection net.Conn) error {
 		return err
 	}
 	log.Println("NICK data:", string(nick_data))
+
+    // check if CAP LS 302 or any other version is sent, this guages the client version of irc
+    if strings.HasPrefix(string(nick_data), "CAP") {
+        // check if the client is requesting a Version
+        if strings.Contains(string(nick_data), "LS") {
+        }
+        nick_data, err = getDataElseDie(connection)
+        if err != nil {
+            log.Println("Error getting NICK data:", err)
+            connection.Close()
+            return err
+        }
+        log.Println("NICK data:", string(nick_data))
+    }
+
 	nick := strings.TrimSpace(string(nick_data))
 	if strings.HasPrefix(nick, "NICK") {
 		nick = strings.TrimSpace(strings.Split(nick, " ")[1])
@@ -194,9 +209,8 @@ func handleNewUser(connection net.Conn) error {
 
 	log.Printf("%s connected", client.String())
 
-	// send back a 001 message
-	connection.Write([]byte(fmt.Sprintf(":%s 001 %s :Welcome to the IRC server\r\n", host, client.nick)))
-	log.Printf("Sent: :%s 001 %s :Welcome to the IRC server", host, client.nick)
+    // Send the welcome message
+    sendInitMessages(client)
 
 	// Add the client to the map
 	clientMap[client.nick] = client
@@ -206,6 +220,44 @@ func handleNewUser(connection net.Conn) error {
 
 }
 
+func sendInitMessages(client *Client) {
+    /*
+    :server.autumnnippert.com 001 user :Welcome to the irc IRC Network user!user@nt-238-77.w4.unh.edu
+:server.autumnnippert.com 002 user :Your host is server.autumnnippert.com, running version InspIRCd-3
+:server.autumnnippert.com 003 user :This server was created 03:09:15 Apr 03 2025
+:server.autumnnippert.com 004 user server.autumnnippert.com InspIRCd-3 iosw biklmnopstv :bklov
+:server.autumnnippert.com 005 user AWAYLEN=200 CASEMAPPING=rfc1459 CHANLIMIT=#:20 CHANMODES=b,k,l,imnpst CHANNELLEN=64 CHANTYPES=# ELIST=CMNTU HOSTLEN=64 KEYLEN=32 KICKLEN=255 LINELEN=512 MAXLIST=b:100 :are supported by this server
+:server.autumnnippert.com 005 user MAXTARGETS=20 MODES=20 NAMELEN=128 NETWORK=irc NICKLEN=30 PREFIX=(ov)@+ SAFELIST STATUSMSG=@+ TOPICLEN=307 USERLEN=10 USERMODES=,,s,iow WHOX :are supported by this server
+:server.autumnnippert.com 251 user :There are 0 users and 0 invisible on 1 servers
+:server.autumnnippert.com 253 user 1 :unknown connections
+:server.autumnnippert.com 254 user 0 :channels formed
+:server.autumnnippert.com 255 user :I have 0 clients and 0 servers
+:server.autumnnippert.com 265 user :Current local users: 0  Max: 1
+:server.autumnnippert.com 266 user :Current global users: 0  Max: 1
+:server.autumnnippert.com 375 user :server.autumnnippert.com message of the day
+:server.autumnnippert.com 372 user : You know the drill
+:server.autumnnippert.com 372 user : 
+:server.autumnnippert.com 376 user :End of message of the day.
+    */
+    connection := client.conn
+    connection.Write([]byte(fmt.Sprintf(":%s 001 %s :Welcome to the IRC server\r\n", host, client.nick)))
+    connection.Write([]byte(fmt.Sprintf(":%s 002 %s :Your host is %s, running version %s\r\n", host, client.nick, host, Version)))
+    connection.Write([]byte(fmt.Sprintf(":%s 003 %s :This server was created %s\r\n", host, client.nick, time.Now().Format(time.RFC1123))))
+    connection.Write([]byte(fmt.Sprintf(":%s 004 %s %s %s :bklov\r\n", host, client.nick, host, Version)))
+    connection.Write([]byte(fmt.Sprintf(":%s 005 %s AWAYLEN=200 CASEMAPPING=rfc1459 CHANLIMIT=#:20 CHANMODES=b,k,l,imnpst CHANNELLEN=64 CHANTYPES=# ELIST=CMNTU HOSTLEN=64 KEYLEN=32 KICKLEN=255 LINELEN=512 MAXLIST=b:100 :are supported by this server\r\n", host, client.nick)))
+    connection.Write([]byte(fmt.Sprintf(":%s 005 %s MAXTARGETS=20 MODES=20 NAMELEN=128 NETWORK=%s NICKLEN=30 PREFIX=(ov)@+ SAFELIST STATUSMSG=@+ TOPICLEN=307 USERLEN=10 USERMODES=,,s,iow WHOX :are supported by this server\r\n", host, client.nick, host)))
+    connection.Write([]byte(fmt.Sprintf(":%s 251 %s :There are 0 users and 0 invisible on 1 servers\r\n", host, client.nick)))
+    connection.Write([]byte(fmt.Sprintf(":%s 253 %s 1 :unknown connections\r\n", host, client.nick)))
+    connection.Write([]byte(fmt.Sprintf(":%s 254 %s 0 :channels formed\r\n", host, client.nick)))
+    connection.Write([]byte(fmt.Sprintf(":%s 255 %s :I have 0 clients and 0 servers\r\n", host, client.nick)))
+    connection.Write([]byte(fmt.Sprintf(":%s 265 %s :Current local users: 0  Max: 1\r\n", host, client.nick)))
+    connection.Write([]byte(fmt.Sprintf(":%s 266 %s :Current global users: 0  Max: 1\r\n", host, client.nick)))
+    connection.Write([]byte(fmt.Sprintf(":%s 375 %s :%s message of the day\r\n", host, client.nick, host)))
+    connection.Write([]byte(fmt.Sprintf(":%s 372 %s : You know the drill\r\n", host, client.nick)))
+    connection.Write([]byte(fmt.Sprintf(":%s 372 %s : \r\n", host, client.nick)))
+    connection.Write([]byte(fmt.Sprintf(":%s 376 %s :End of message of the day.\r\n", host, client.nick)))
+}
+ 
 func createChannel(name string) *Channel {
 	log.Printf("Creating channel: %s", name)
 	// Create a new channel
@@ -226,7 +278,7 @@ func addUserToChannel(channel *Channel, client *Client) {
 
 	// Send a message to all members of the channel
 	message := fmt.Sprintf("%s has joined the channel", client.nick)
-	sendMessageToChannel(channel, message)
+    sendMessageToChannel(channel, host, message)
 }
 
 func disconnectUser(client *Client) {
@@ -241,11 +293,14 @@ func disconnectUser(client *Client) {
 	log.Printf("%s disconnected", client.String())
 }
 
-func sendMessageToChannel(channel *Channel, message string) {
+func sendMessageToChannel(channel *Channel, sender string, message string) {
 	log.Printf("Sending message to channel %s: %s", channel.name, message)
 	// Send message to all members of the channel
 	for _, member := range channel.members {
-		member.conn.Write([]byte(fmt.Sprintf(":%s PRIVMSG %s :%s\r\n", member.String(), channel.name, message)))
+        if member.String() == sender {
+            continue
+        }
+		member.conn.Write([]byte(fmt.Sprintf(":%s PRIVMSG %s :%s\r\n", sender, channel.name, message)))
 	}
 }
 
@@ -295,7 +350,7 @@ func parseCommand(str string, client *Client) {
 				client.conn.Write([]byte(fmt.Sprintf("ERROR :Channel %s not found\r\n", target)))
 				return
 			}
-			sendMessageToChannel(channel, message)
+			sendMessageToChannel(channel, client.String(), message)
 		} else {
 			// send message to user
 			client, exists := clientMap[target]
@@ -338,7 +393,7 @@ func parseCommand(str string, client *Client) {
 			delete(client.channels, channel)
 			// send message to all members of the channel
 			message := fmt.Sprintf("%s has left the channel", client.nick)
-			sendMessageToChannel(channels[channel], message)
+			sendMessageToChannel(channels[channel], host, message)
 		} else {
 			client.conn.Write([]byte(fmt.Sprintf("ERROR :You are not in channel %s\r\n", channel)))
 		}
